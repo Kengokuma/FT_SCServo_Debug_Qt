@@ -1,34 +1,38 @@
 #!/bin/bash
-SCRIPT_DIR=$(cd $(dirname $0); pwd)
-COPY_TARGET_BIN=FT_SCServo_Debug_Qt
-# amd64 or arm64
-ARCH=${1:-amd64}
-MOUNT_TARGET=./build
-DEB_ROOT=./deb_root
-VERSION=${2:-0.0.1}
-DEB_NAME=ft-scservo-debug-qt_${VERSION}_${ARCH}
+set -euo pipefail
 
-if [ ${ARCH} == "arm64" ]; then
-    docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
-fi
+SCRIPT_DIR=$(cd "$(dirname "$0")"; pwd)
+PROJECT_DIR=$(cd "${SCRIPT_DIR}/.."; pwd)
+PACKAGE=ft-scservo-debug-qt
+VERSION=${1:-1.1.1}
+ARCH=${2:-$(dpkg --print-architecture)}
+OUTPUT="${SCRIPT_DIR}/${PACKAGE}_${VERSION}_${ARCH}.deb"
+STAGING_DIR=$(mktemp -d)
 
-# select arch
-docker build -t deb_build -f ${SCRIPT_DIR}/dockerfile.${ARCH} ${SCRIPT_DIR}
-docker run -it --rm -v ${MOUNT_TARGET}:/build deb_build /build/build.bash
+cleanup()
+{
+    rm -rf "${STAGING_DIR}"
+}
+trap cleanup EXIT
 
-mkdir -p ${DEB_ROOT}/usr/bin ${DEB_ROOT}/DEBIAN/
-cp ${MOUNT_TARGET}/FT_SCServo_Debug_Qt/FT_SCServo_Debug_Qt ${DEB_ROOT}/usr/bin/
+qmake "${PROJECT_DIR}/FT_SCServo_Debug_Qt.pro" -o "${PROJECT_DIR}/Makefile"
+make -C "${PROJECT_DIR}" clean
+make -C "${PROJECT_DIR}" -j"$(nproc)"
 
-echo "Package: ft-scservo-debug-qt" > ${DEB_ROOT}/DEBIAN/control
-echo "Version: $VERSION" >> ${DEB_ROOT}/DEBIAN/control
-echo "Section: base" >> ${DEB_ROOT}/DEBIAN/control
-echo "Priority: optional" >> ${DEB_ROOT}/DEBIAN/control
-echo "Architecture: $ARCH" >> ${DEB_ROOT}/DEBIAN/control
-echo "Depends: libqt5serialport5-dev, qtbase5-dev" >> ${DEB_ROOT}/DEBIAN/control
-echo "Maintainer: Kotakku <Kotakkucu@gmail.com>" >> ${DEB_ROOT}/DEBIAN/control
-echo "Description: FeeTech Servo Debug Qt" >> ${DEB_ROOT}/DEBIAN/control
+install -Dm755 "${PROJECT_DIR}/FT_SCServo_Debug_Qt" \
+    "${STAGING_DIR}/usr/bin/FT_SCServo_Debug_Qt"
+mkdir -p "${STAGING_DIR}/DEBIAN"
 
-dpkg-deb --build -Z xz --root-owner-group ${DEB_ROOT} ${SCRIPT_DIR}/${DEB_NAME}.deb
+printf '%s\n' \
+    "Package: ${PACKAGE}" \
+    "Version: ${VERSION}" \
+    "Section: electronics" \
+    "Priority: optional" \
+    "Architecture: ${ARCH}" \
+    "Depends: libqt5core5a, libqt5gui5, libqt5widgets5, libqt5serialport5" \
+    "Maintainer: Kotakku <Kotakkucu@gmail.com>" \
+    "Description: Qt utility for configuring FEETECH SCS/STS servos" \
+    > "${STAGING_DIR}/DEBIAN/control"
 
-sudo rm -rf build/FT_SCServo_Debug_Qt deb_root/
-echo "Create deb package done!"
+dpkg-deb --build --root-owner-group "${STAGING_DIR}" "${OUTPUT}"
+echo "Created ${OUTPUT}"

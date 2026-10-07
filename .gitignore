@@ -1,4 +1,11 @@
 .vscode/
 *.user
+*.o
+.qmake.stash
+FT_SCServo_Debug_Qt
+Makefile
+moc_*.cpp
+moc_*.h
+ui_*.h
 deb_root
 *.deb

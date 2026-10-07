@@ -806,26 +806,44 @@ void MainWindow::onMemSetButtonClicked()
     auto mem_config = getMemConfig(select_servo_.model_);
     auto &[address, name, size, default_value, dir_bit, is_eprom, is_readonly, min_val, max_val] = mem_config[selectedRows.row()];
 
-    // Todo address参照じゃなくする
-    if(address == 5)
+    const bool is_sts_eprom = select_servo_.model_ == feetech_servo::ModelSeries::STS && is_eprom;
+    const int old_id = select_servo_.id_;
+    int target_id = old_id;
+    int torque_enable = 0;
+
+    if(is_sts_eprom)
     {
-        // Toso: STSサーボ以外に対応する
-        uint8_t val = ui->memSetLineEdit->text().toShort();
-        scserial_->write_byte(select_servo_.id_, 55, 0); // unlock
-        scserial_->write_byte(select_servo_.id_, address, val);
-        scserial_->write_byte(select_servo_.id_, 55, 1); // lock
-        select_servo_.id_ = val;
+        torque_enable = scserial_->read_byte(old_id, SMS_STS_TORQUE_ENABLE);
+        if(torque_enable > 0)
+            scserial_->write_byte(old_id, SMS_STS_TORQUE_ENABLE, 0);
+
+        sms_sts_serial_->unlock_eprom(old_id);
     }
+
     if(size == 2)
     {
         int16_t val = ui->memSetLineEdit->text().toShort();
-        scserial_->write_word(select_servo_.id_, address, val);
+        scserial_->write_word(old_id, address, val);
     }
     else
     {
         uint8_t val = ui->memSetLineEdit->text().toShort();
-        scserial_->write_byte(select_servo_.id_, address, val);
+        scserial_->write_byte(old_id, address, val);
+
+        if(is_sts_eprom && address == SMS_STS_ID)
+            target_id = val;
     }
+
+    if(is_sts_eprom)
+    {
+        // ID writes take effect immediately; subsequent commands use the new ID.
+        sms_sts_serial_->lock_eprom(target_id);
+        if(torque_enable > 0)
+            scserial_->write_byte(target_id, SMS_STS_TORQUE_ENABLE, torque_enable);
+
+        select_servo_.id_ = target_id;
+    }
+
     is_mem_writing_ = false;
 }
 
